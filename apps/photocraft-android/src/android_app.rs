@@ -169,6 +169,7 @@ fn create_mobile_services(storage_dir: Option<PathBuf>, mobile_state: mobile::Sh
 
     // File dialogs: the Kotlin shell answers open/folder picks with the system picker; saves use
     // the in-app name dialog (the write service hands the bytes to the picker when it must).
+    let state_notice = mobile_state.clone();
     let state_dialog = mobile_state;
     let req_root = storage_dir.as_ref().map(|d| d.join("PhotoCraft").join("req"));
     services.file_dialog = Some(Box::new(move |request, _parent, reply| {
@@ -215,8 +216,17 @@ fn create_mobile_services(storage_dir: Option<PathBuf>, mobile_state: mobile::Sh
         if let Some(parent) = p.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if std::fs::write(p, bytes).is_ok() {
+        if let Ok(()) = std::fs::write(p, bytes) {
+            if let Ok(mut state) = state_notice.lock() {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
+                state.notice = Some(format!("Saved {name}"));
+                state.notice_error = false;
+            }
             return Ok(());
+        }
+        // The pick is still pending: no dialog until the shell tells how it went.
+        if let Ok(mut state) = state_notice.lock() {
+            state.notice = None;
         }
         let root = write_root.as_ref().ok_or_else(|| format!("cannot write {path}"))?;
         let outbox = root.join("outbox");

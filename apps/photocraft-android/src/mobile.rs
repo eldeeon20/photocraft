@@ -90,10 +90,13 @@ pub fn render_mobile_action_bar(app: &mut PhotocraftApp, state: &mut MobileState
                 }
 
                 // Save: writes in place, or asks for a name through the save dialog.
-                if ui.button(RichText::new("💾 Save").size(13.0)).clicked() {
-                    let doc_name = app.session.active().map(|d| d.doc.name.clone()).unwrap_or_else(|| "artwork.png".into());
-                    state.save_filename = doc_name;
-                    state.save_dialog_open = true;
+                if ui.button(RichText::new("💾 Save").size(13.0)).clicked()
+                    && let Err(e) = app.save_as(None)
+                {
+                    app.ui.status = e.clone();
+                    app.ui.status_error = true;
+                    state.notice = Some(format!("Couldn't save: {e}"));
+                    state.notice_error = true;
                 }
 
                 ui.separator();
