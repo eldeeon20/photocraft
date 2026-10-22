@@ -53,6 +53,17 @@ pub fn start(android_app: android_activity::AndroidApp) {
             // Apply phone layout defaults (canvas-first, collapsed dock, mobile action bar).
             mobile::apply_mobile_defaults(&mut app);
 
+            // Say whether the Kotlin shell is reachable: it writes boot.txt in its data dir.
+            if let Ok(state) = mobile_state.lock() {
+                let dir = state.files_dir.clone();
+                let boot = dir.join("boot.txt");
+                app.ui.status = match std::fs::read_to_string(&boot) {
+                    Ok(text) => format!("shell: {}", text.lines().next().unwrap_or("alive")),
+                    Err(_) => format!("shell silent; looked in {}", dir.display()),
+                };
+                app.ui.status_error = false;
+            }
+
             if let Some(rs) = cc.wgpu_render_state.clone() {
                 log::info!("photocraft-android: wgpu backend {:?}", rs.adapter.get_info().backend);
                 app.set_wgpu(rs);
@@ -98,6 +109,7 @@ impl eframe::App for MobileShell {
         mobile::render_fullscreen_exit_button(&ctx, &mut state, &mut self.app);
         mobile::render_file_picker_dialog(&ctx, &mut state);
         mobile::render_save_dialog(&ctx, &mut state);
+        mobile::render_status_banner(&mut self.app, &mut state, &ctx);
     }
 }
 
@@ -154,11 +166,21 @@ fn create_mobile_services(storage_dir: Option<PathBuf>, mobile_state: mobile::Sh
     services.file_dialog = Some(Box::new(move |request, _parent, reply| {
         if let Ok(mut state) = state_dialog.lock() {
             match request {
-                FileDialogRequest::Open { .. } => {
+                FileDialogRequest::Open { initial_dir, .. } => {
                     state.pending_open = Some(reply);
-                    if let Some(req) = &req_root {
-                        let _ = std::fs::create_dir_all(req);
-                        let _ = std::fs::write(req.join("open.req"), "*/*\n");
+                    match &req_root {
+                        Some(req) => {
+                            let _ = std::fs::create_dir_all(req);
+                            let _ = std::fs::write(req.join("open.req"), "*/*\n");
+                        }
+                        None => {
+                            state.file_picker_open = true;
+                            state.selected_file = None;
+                            state.current_dir = initial_dir
+                                .map(PathBuf::from)
+                                .filter(|p| p.is_dir())
+                                .unwrap_or_else(mobile::default_browse_dir);
+                        }
                     }
                 }
                 FileDialogRequest::Folder { .. } => {

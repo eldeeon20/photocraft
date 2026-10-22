@@ -27,6 +27,9 @@ pub struct MobileState {
     pub pending_folder: Option<FileDialogReply>,
     /// App-owned directory the Kotlin shell uses for SAF requests and results.
     pub files_dir: PathBuf,
+    /// Last status shown as a transient banner, with the time it appeared.
+    pub last_status: String,
+    pub status_at: f64,
     pub is_fullscreen: bool,
 }
 
@@ -165,6 +168,29 @@ pub fn render_fullscreen_exit_button(ctx: &egui::Context, state: &mut MobileStat
                 state.is_fullscreen = false;
                 app.ui.view.screen_mode = "standard".into();
             }
+        });
+}
+
+
+/// Shows the app's status (errors included) as a short-lived banner: the status bar is hidden on
+/// phones, so otherwise a failed save or open would say nothing.
+pub fn render_status_banner(app: &mut PhotocraftApp, state: &mut MobileState, ctx: &egui::Context) {
+    let now = ctx.input(|i| i.time);
+    if state.last_status != app.ui.status {
+        state.last_status = app.ui.status.clone();
+        state.status_at = now;
+    }
+    if app.ui.status.is_empty() || now - state.status_at > 9.0 {
+        return;
+    }
+    let color = if app.ui.status_error { Color32::from_rgb(255, 120, 120) } else { Color32::from_rgb(150, 230, 150) };
+    egui::Area::new(egui::Id::new("mobile_status_banner"))
+        .anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -28.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.colored_label(color, RichText::new(&app.ui.status).size(14.0));
+            });
         });
 }
 

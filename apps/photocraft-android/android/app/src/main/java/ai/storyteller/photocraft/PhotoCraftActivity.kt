@@ -51,6 +51,8 @@ class PhotoCraftActivity : NativeActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Rust reads this to tell whether the shell is really running in the same data dir.
+        runCatching { File(root, "boot.txt").writeText("alive ${filesDir.absolutePath}") }
         askForStorage()
     }
 
@@ -80,15 +82,15 @@ class PhotoCraftActivity : NativeActivity() {
             val mime = open.readText().lineSequence().firstOrNull()?.trim().orEmpty()
             open.delete()
             if (mime == "folder") {
-                startActivityForResult(
+                launch(
                     Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
                     REQ_FOLDER,
                 )
             } else {
-                startActivityForResult(
+                launch(
                     Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                         addCategory(Intent.CATEGORY_OPENABLE)
-                        type = mime.ifEmpty { "image/*" }
+                        type = mime.ifEmpty { "*/*" }
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     },
                     REQ_OPEN,
@@ -107,7 +109,7 @@ class PhotoCraftActivity : NativeActivity() {
                 val name = lines[1]
                 val mime = lines.getOrElse(2) { mimeOf(name) }
                 pendingSave = PendingSave(staged, name, mime)
-                startActivityForResult(
+                launch(
                     Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                         addCategory(Intent.CATEGORY_OPENABLE)
                         type = mime
@@ -169,6 +171,20 @@ class PhotoCraftActivity : NativeActivity() {
                 }
                 val path = treePath(uri)
                 if (path != null) answerFolder("OK\n$path") else answerFolder("ERR that folder is not on shared storage")
+            }
+        }
+    }
+
+    /** Starts a system picker, reporting instead of dying when the system refuses it. */
+    private fun launch(intent: Intent, code: Int) {
+        try {
+            startActivityForResult(intent, code)
+        } catch (e: Exception) {
+            val message = "ERR ${e.javaClass.simpleName}: ${e.message}"
+            when (code) {
+                REQ_OPEN -> answerOpen(message)
+                REQ_SAVE -> answerSave(message)
+                REQ_FOLDER -> answerFolder(message)
             }
         }
     }
