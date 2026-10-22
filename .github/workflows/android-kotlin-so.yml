@@ -1,0 +1,49 @@
+name: android-kotlin-so
+
+# Builds the Rust app core (libphotocraft_android.so, the original egui UI) for Android arm64
+# and publishes it to Release android-core-v1. Triggered by a tag like so-1, so it runs from
+# any branch without touching the default branch.
+
+on:
+  push:
+    tags:
+      - "so-*"
+
+permissions:
+  contents: write
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain with the Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+      - name: Build the app core (arm64-v8a)
+        run: |
+          ndk="${ANDROID_NDK_LATEST_HOME:-}"
+          if [ -z "$ndk" ]; then
+            ndk=$(find /usr/local/lib/android/sdk/ndk -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          fi
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          # --platform 26 matches minSdk (cargo-ndk otherwise links the lowest sysroot).
+          cargo ndk -t arm64-v8a --platform 26 -o /tmp/jniLibs build --release -p photocraft-android
+          ls -l /tmp/jniLibs/arm64-v8a
+      - name: Publish to Release android-core-v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          lib=/tmp/jniLibs/arm64-v8a/libphotocraft_android.so
+          test -f "$lib"
+          gh release delete android-core-v1 -y >/dev/null 2>&1 || true
+          gh release create android-core-v1 --title "PhotoCraft Android core (arm64)" \
+            --notes "libphotocraft_android.so: the original egui app + engine, prebuilt. Consumed by android-kotlin-apk."
+          gh release upload android-core-v1 "$lib" --clobber
