@@ -38,6 +38,14 @@ pub fn start(android_app: android_activity::AndroidApp) {
             cc.egui_ctx.global_style_mut(mobile::configure_mobile_style);
 
             let mobile_state: mobile::SharedMobileState = Arc::new(Mutex::new(mobile::MobileState::default()));
+            if let Some(dir) = &internal_path {
+                let root = dir.join("PhotoCraft");
+                let _ = std::fs::create_dir_all(root.join("req"));
+                let _ = std::fs::create_dir_all(root.join("res"));
+                if let Ok(mut state) = mobile_state.lock() {
+                    state.files_dir = root;
+                }
+            }
 
             let services = create_mobile_services(internal_path.clone(), mobile_state.clone());
             let mut app = PhotocraftApp::new(Session::new(), services);
@@ -81,6 +89,10 @@ impl eframe::App for MobileShell {
 
         // 2. Main PhotoCraft canvas & panels
         self.app.ui(ui, frame);
+
+        // 2b. The shell answers file dialogs from another process context: look for its results.
+        mobile::poll_saf(&mut self.app, &mut state);
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
 
         // 3. Floating overlays
         mobile::render_fullscreen_exit_button(&ctx, &mut state, &mut self.app);
@@ -135,30 +147,26 @@ fn create_mobile_services(storage_dir: Option<PathBuf>, mobile_state: mobile::Sh
             .map_err(|e| e.to_string())
     }));
 
-    // File dialog service wired to mobile in-app picker.
+    // File dialogs: the Kotlin shell answers open/folder picks with the system picker; saves use
+    // the in-app name dialog (the write service hands the bytes to the picker when it must).
     let state_dialog = mobile_state;
+    let req_root = storage_dir.as_ref().map(|d| d.join("PhotoCraft").join("req"));
     services.file_dialog = Some(Box::new(move |request, _parent, reply| {
         if let Ok(mut state) = state_dialog.lock() {
             match request {
-                FileDialogRequest::Open { initial_dir, .. } => {
-                    state.file_picker_open = true;
-                    state.folder_pick = false;
-                    state.selected_file = None;
-                    state.current_dir = initial_dir
-                        .map(PathBuf::from)
-                        .filter(|p| p.is_dir())
-                        .unwrap_or_else(mobile::default_browse_dir);
+                FileDialogRequest::Open { .. } => {
                     state.pending_open = Some(reply);
+                    if let Some(req) = &req_root {
+                        let _ = std::fs::create_dir_all(req);
+                        let _ = std::fs::write(req.join("open.req"), "*/*\n");
+                    }
                 }
-                FileDialogRequest::Folder { initial_dir } => {
-                    state.file_picker_open = true;
-                    state.folder_pick = true;
-                    state.selected_file = None;
-                    state.current_dir = initial_dir
-                        .map(PathBuf::from)
-                        .filter(|p| p.is_dir())
-                        .unwrap_or_else(mobile::default_browse_dir);
+                FileDialogRequest::Folder { .. } => {
                     state.pending_folder = Some(reply);
+                    if let Some(req) = &req_root {
+                        let _ = std::fs::create_dir_all(req);
+                        let _ = std::fs::write(req.join("open.req"), "folder\n");
+                    }
                 }
                 FileDialogRequest::Save { suggested } => {
                     state.save_filename = suggested;
@@ -169,14 +177,46 @@ fn create_mobile_services(storage_dir: Option<PathBuf>, mobile_state: mobile::Sh
         }
     }));
 
-    // Write service for persisting files to disk.
-    services.write = Some(Box::new(|path: &str, bytes: &[u8]| {
+    // Write service: raw paths where Android allows it (All files access), otherwise stage the
+    // bytes and let the Kotlin shell write them into the document the user picks with SAF.
+    let write_root = storage_dir.as_ref().map(|d| d.join("PhotoCraft"));
+    services.write = Some(Box::new(move |path: &str, bytes: &[u8]| {
         let p = std::path::Path::new(path);
         if let Some(parent) = p.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        std::fs::write(p, bytes).map_err(|e| e.to_string())
+        if std::fs::write(p, bytes).is_ok() {
+            return Ok(());
+        }
+        let root = write_root.as_ref().ok_or_else(|| format!("cannot write {path}"))?;
+        let outbox = root.join("outbox");
+        let req = root.join("req");
+        std::fs::create_dir_all(&outbox).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&req).map_err(|e| e.to_string())?;
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("export.png");
+        let staged = outbox.join(name);
+        std::fs::write(&staged, bytes).map_err(|e| e.to_string())?;
+        std::fs::write(
+            req.join("save.req"),
+            format!("{}\n{}\n{}\n", staged.display(), name, mime_for(name)),
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
     }));
 
     services
+}
+
+/// The MIME type the system picker shows for a file name.
+fn mime_for(name: &str) -> &'static str {
+    match name.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "tif" | "tiff" => "image/tiff",
+        "bmp" => "image/bmp",
+        "gif" => "image/gif",
+        "psd" | "psb" => "image/vnd.adobe.photoshop",
+        _ => "application/octet-stream",
+    }
 }

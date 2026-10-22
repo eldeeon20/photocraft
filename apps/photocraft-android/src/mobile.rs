@@ -25,6 +25,8 @@ pub struct MobileState {
     /// The picker is choosing a folder (Services::file_dialog's `Folder`) instead of a file.
     pub folder_pick: bool,
     pub pending_folder: Option<FileDialogReply>,
+    /// App-owned directory the Kotlin shell uses for SAF requests and results.
+    pub files_dir: PathBuf,
     pub is_fullscreen: bool,
 }
 
@@ -73,14 +75,15 @@ pub fn render_mobile_action_bar(app: &mut PhotocraftApp, state: &mut MobileState
 
                 ui.separator();
 
-                // Open file button
-                if ui.button(RichText::new("📂 Open").size(13.0)).clicked() {
-                    state.file_picker_open = true;
-                    state.current_dir = default_browse_dir();
-                    state.selected_file = None;
+                // Open: the app's own File › Open, which the shell answers with the system picker.
+                if ui.button(RichText::new("📂 Open").size(13.0)).clicked()
+                    && let Err(e) = app.open_dialog_file()
+                {
+                    app.ui.status = e;
+                    app.ui.status_error = true;
                 }
 
-                // Quick Save button
+                // Save: writes in place, or asks for a name through the save dialog.
                 if ui.button(RichText::new("💾 Save").size(13.0)).clicked() {
                     let doc_name = app.session.active().map(|d| d.doc.name.clone()).unwrap_or_else(|| "artwork.png".into());
                     state.save_filename = doc_name;
@@ -304,6 +307,95 @@ pub fn render_file_picker_dialog(ctx: &egui::Context, state: &mut MobileState) {
     }
 }
 
+
+/// Answers the requests the Kotlin shell resolved with the system picker. Rust writes a request
+/// file, the shell copies the chosen file into the sandbox (or writes the chosen document) and
+/// leaves a result here; the pending dialog keeps the app waiting until it shows up.
+pub fn poll_saf(app: &mut PhotocraftApp, state: &mut MobileState) {
+    if state.files_dir.as_os_str().is_empty() {
+        return;
+    }
+    let res = state.files_dir.join("res");
+    if !res.is_dir() {
+        return;
+    }
+
+    let open = res.join("open.result");
+    if open.exists() {
+        let text = std::fs::read_to_string(&open).unwrap_or_default();
+        let _ = std::fs::remove_file(&open);
+        let mut lines = text.lines();
+        match lines.next().unwrap_or("").trim() {
+            "OK" => {
+                let path = lines.next().unwrap_or("").trim().to_string();
+                if let Some(reply) = state.pending_open.take() {
+                    reply.send(Some(FileDialogAnswer::Paths(vec![path])));
+                }
+            }
+            "CANCEL" => {
+                if let Some(reply) = state.pending_open.take() {
+                    reply.send(None);
+                }
+            }
+            other => {
+                let why = other.strip_prefix("ERR ").unwrap_or(other).to_string();
+                app.ui.status = format!("Couldn't open the picture: {why}");
+                app.ui.status_error = true;
+                if let Some(reply) = state.pending_open.take() {
+                    reply.send(Some(FileDialogAnswer::Unavailable(why)));
+                }
+            }
+        }
+    }
+
+    let save = res.join("save.result");
+    if save.exists() {
+        let text = std::fs::read_to_string(&save).unwrap_or_default();
+        let _ = std::fs::remove_file(&save);
+        let mut lines = text.lines();
+        match lines.next().unwrap_or("").trim() {
+            "OK" => {
+                app.ui.status = format!("Saved {}", lines.next().unwrap_or("").trim());
+                app.ui.status_error = false;
+            }
+            "CANCEL" => {
+                app.ui.status = "Save cancelled".into();
+                app.ui.status_error = true;
+            }
+            other => {
+                app.ui.status = other.strip_prefix("ERR ").unwrap_or(other).to_string();
+                app.ui.status_error = true;
+            }
+        }
+    }
+
+    let folder = res.join("folder.result");
+    if folder.exists() {
+        let text = std::fs::read_to_string(&folder).unwrap_or_default();
+        let _ = std::fs::remove_file(&folder);
+        let mut lines = text.lines();
+        match lines.next().unwrap_or("").trim() {
+            "OK" => {
+                let path = lines.next().unwrap_or("").trim().to_string();
+                if let Some(reply) = state.pending_folder.take() {
+                    reply.send(Some(FileDialogAnswer::FolderTo(path)));
+                }
+            }
+            "CANCEL" => {
+                if let Some(reply) = state.pending_folder.take() {
+                    reply.send(None);
+                }
+            }
+            other => {
+                let why = other.strip_prefix("ERR ").unwrap_or(other).to_string();
+                if let Some(reply) = state.pending_folder.take() {
+                    reply.send(Some(FileDialogAnswer::Unavailable(why)));
+                }
+            }
+        }
+    }
+}
+
 /// Mobile save dialog for exporting or saving images.
 pub fn render_save_dialog(ctx: &egui::Context, state: &mut MobileState) {
     if !state.save_dialog_open {
@@ -340,9 +432,10 @@ pub fn render_save_dialog(ctx: &egui::Context, state: &mut MobileState) {
             let can_write_dir = save_dir.is_dir() || std::fs::create_dir_all(&save_dir).is_ok();
             ui.label(RichText::new(format!("Destination: {}", save_dir.display())).weak().small());
             if !can_write_dir {
-                ui.colored_label(
-                    egui::Color32::LIGHT_RED,
-                    "Cannot write there: grant PhotoCraft storage access first.",
+                ui.label(
+                    RichText::new("No direct access to that folder: after Save Now, Android asks where to put the file.")
+                        .weak()
+                        .small(),
                 );
             }
 
@@ -355,7 +448,7 @@ pub fn render_save_dialog(ctx: &egui::Context, state: &mut MobileState) {
                     }
                 }
 
-                let can_save = !state.save_filename.trim().is_empty() && can_write_dir;
+                let can_save = !state.save_filename.trim().is_empty();
                 if ui.add_enabled(can_save, egui::Button::new(RichText::new("Save Now").strong())).clicked() {
                     let filename = if Path::new(&state.save_filename).extension().is_none() {
                         format!("{}.png", state.save_filename.trim())
