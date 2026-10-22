@@ -140,10 +140,25 @@ fn create_mobile_services(storage_dir: Option<PathBuf>, mobile_state: mobile::Sh
     services.file_dialog = Some(Box::new(move |request, _parent, reply| {
         if let Ok(mut state) = state_dialog.lock() {
             match request {
-                FileDialogRequest::Open { .. } => {
+                FileDialogRequest::Open { initial_dir, .. } => {
                     state.file_picker_open = true;
+                    state.folder_pick = false;
                     state.selected_file = None;
+                    state.current_dir = initial_dir
+                        .map(PathBuf::from)
+                        .filter(|p| p.is_dir())
+                        .unwrap_or_else(mobile::default_browse_dir);
                     state.pending_open = Some(reply);
+                }
+                FileDialogRequest::Folder { initial_dir } => {
+                    state.file_picker_open = true;
+                    state.folder_pick = true;
+                    state.selected_file = None;
+                    state.current_dir = initial_dir
+                        .map(PathBuf::from)
+                        .filter(|p| p.is_dir())
+                        .unwrap_or_else(mobile::default_browse_dir);
+                    state.pending_folder = Some(reply);
                 }
                 FileDialogRequest::Save { suggested } => {
                     state.save_filename = suggested;

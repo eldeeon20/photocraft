@@ -22,6 +22,9 @@ pub struct MobileState {
     pub save_filename: String,
     pub pending_open: Option<FileDialogReply>,
     pub pending_save: Option<FileDialogReply>,
+    /// The picker is choosing a folder (Services::file_dialog's `Folder`) instead of a file.
+    pub folder_pick: bool,
+    pub pending_folder: Option<FileDialogReply>,
     pub is_fullscreen: bool,
 }
 
@@ -172,8 +175,9 @@ pub fn render_file_picker_dialog(ctx: &egui::Context, state: &mut MobileState) {
     let max_w = (screen.width() - 24.0).min(480.0);
     let max_h = (screen.height() - 48.0).min(560.0);
 
+    let folder_mode = state.folder_pick;
     let mut open = true;
-    egui::Window::new("📂 Open Image")
+    egui::Window::new(if folder_mode { "📂 Choose Folder" } else { "📂 Open Image" })
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
@@ -230,8 +234,11 @@ pub fn render_file_picker_dialog(ctx: &egui::Context, state: &mut MobileState) {
                     }
                 }
 
-                // Supported image files
+                // Supported image files (a folder pick only shows folders)
                 for file in files {
+                    if folder_mode {
+                        continue;
+                    }
                     let filename = file.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "file".into());
                     let is_selected = state.selected_file.as_ref() == Some(&file);
 
@@ -247,12 +254,27 @@ pub fn render_file_picker_dialog(ctx: &egui::Context, state: &mut MobileState) {
             ui.horizontal(|ui| {
                 if ui.button("Cancel").clicked() {
                     state.file_picker_open = false;
+                    state.folder_pick = false;
                     if let Some(reply) = state.pending_open.take() {
+                        reply.send(None);
+                    }
+                    if let Some(reply) = state.pending_folder.take() {
                         reply.send(None);
                     }
                 }
 
-                let can_open = state.selected_file.is_some();
+                if folder_mode {
+                    if ui.add(egui::Button::new(RichText::new("Choose this folder").strong())).clicked() {
+                        let dir = state.current_dir.clone();
+                        state.file_picker_open = false;
+                        state.folder_pick = false;
+                        if let Some(reply) = state.pending_folder.take() {
+                            reply.send(Some(FileDialogAnswer::FolderTo(dir.to_string_lossy().to_string())));
+                        }
+                    }
+                }
+
+                let can_open = state.selected_file.is_some() && !folder_mode;
                 if ui.add_enabled(can_open, egui::Button::new(RichText::new("Open File").strong())).clicked()
                     && let Some(path) = state.selected_file.take()
                 {
@@ -266,7 +288,11 @@ pub fn render_file_picker_dialog(ctx: &egui::Context, state: &mut MobileState) {
 
     if !open {
         state.file_picker_open = false;
+        state.folder_pick = false;
         if let Some(reply) = state.pending_open.take() {
+            reply.send(None);
+        }
+        if let Some(reply) = state.pending_folder.take() {
             reply.send(None);
         }
     }
@@ -341,7 +367,7 @@ pub fn render_save_dialog(ctx: &egui::Context, state: &mut MobileState) {
     }
 }
 
-fn default_browse_dir() -> PathBuf {
+pub(crate) fn default_browse_dir() -> PathBuf {
     let pics = PathBuf::from("/sdcard/Pictures");
     if pics.exists() {
         pics
