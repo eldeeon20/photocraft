@@ -1,16 +1,13 @@
 name: android-kotlin-so
 
 # Builds the Rust app core (libphotocraft_android.so, the original egui UI) for Android arm64
-# and publishes it to Release android-core-v1. Triggered by a tag like so-1, so it runs from
-# any branch without touching the default branch.
+# and uploads it as the artifact the APK build consumes. Launched by hand from the Actions tab.
 
 on:
-  push:
-    tags:
-      - "so-*"
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   core:
@@ -37,13 +34,9 @@ jobs:
           # --platform 26 matches minSdk (cargo-ndk otherwise links the lowest sysroot).
           cargo ndk -t arm64-v8a --platform 26 -o /tmp/jniLibs build --release -p photocraft-android
           ls -l /tmp/jniLibs/arm64-v8a
-      - name: Publish to Release android-core-v1
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          lib=/tmp/jniLibs/arm64-v8a/libphotocraft_android.so
-          test -f "$lib"
-          gh release delete android-core-v1 -y >/dev/null 2>&1 || true
-          gh release create android-core-v1 --title "PhotoCraft Android core (arm64)" \
-            --notes "libphotocraft_android.so: the original egui app + engine, prebuilt. Consumed by android-kotlin-apk."
-          gh release upload android-core-v1 "$lib" --clobber
+      - name: Upload the app core (arm64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: photocraft-core-arm64
+          path: /tmp/jniLibs/arm64-v8a/libphotocraft_android.so
+          if-no-files-found: error

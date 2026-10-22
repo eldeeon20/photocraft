@@ -1,9 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
     inputs:
       fuzz:
@@ -13,7 +10,6 @@ on:
       fuzz_seconds:
         description: "Seconds per fuzz target"
         default: "600"
-
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
