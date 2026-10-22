@@ -90,26 +90,33 @@ impl eframe::App for MobileShell {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let ctx = ui.ctx().clone();
 
-        // 1. Mobile top action bar (hidden during fullscreen)
-        if !state.is_fullscreen {
-            mobile::render_mobile_action_bar(&mut self.app, &mut state, ui);
+        // The action bar and the overlays take the state lock in short scopes only: `app.ui`
+        // asks the file-dialog service at the end of the frame, and that service takes the same
+        // lock, so holding the guard across it would deadlock the app on the first Open.
+        {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if !state.is_fullscreen {
+                mobile::render_mobile_action_bar(&mut self.app, &mut state, ui);
+            }
         }
 
-        // 2. Main PhotoCraft canvas & panels
+        // Main PhotoCraft canvas & panels (its services lock the state when they need it).
         self.app.ui(ui, frame);
 
-        // 2b. The shell answers file dialogs from another process context: look for its results.
-        mobile::poll_saf(&mut self.app, &mut state);
-        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        // The shell answers file dialogs from another thread: look for its results.
+        {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            mobile::poll_saf(&mut self.app, &mut state);
+            mobile::render_fullscreen_exit_button(&ctx, &mut state, &mut self.app);
+            mobile::render_file_picker_dialog(&ctx, &mut state);
+            mobile::render_save_dialog(&ctx, &mut state);
+            mobile::render_status_banner(&mut self.app, &mut state, &ctx);
+        }
 
-        // 3. Floating overlays
-        mobile::render_fullscreen_exit_button(&ctx, &mut state, &mut self.app);
-        mobile::render_file_picker_dialog(&ctx, &mut state);
-        mobile::render_save_dialog(&ctx, &mut state);
-        mobile::render_status_banner(&mut self.app, &mut state, &ctx);
+        // The shell's replies arrive while nothing touches the screen: keep frames coming.
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }
 }
 
