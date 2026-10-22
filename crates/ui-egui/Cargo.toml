@@ -31,7 +31,10 @@ photocraft-format = { workspace = true }
 photocraft-codecs = { workspace = true }
 egui = { workspace = true }
 egui_extras = { version = "0.36", default-features = false, features = ["svg"] }
-eframe = { workspace = true, features = ["wgpu", "accesskit"] }
+# `accesskit` is desktop-only: eframe 0.36 refuses it on Android unless the game-activity
+# backend is used, and the Android runner is a native-activity one (see the target section
+# below, which adds it back for every non-Android build).
+eframe = { workspace = true, features = ["wgpu"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
