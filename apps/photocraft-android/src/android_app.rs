@@ -108,8 +108,8 @@ fn create_mobile_services(storage_dir: Option<PathBuf>, mobile_state: mobile::Sh
     }
 
     // Import service for decoding image formats.
-    services.import = Some(Box::new(|name: &str, bytes: &[u8]| {
-        photocraft_io::import(name, bytes)
+    services.import = Some(Box::new(|name: &str, bytes: &[u8], max_svg_group_depth: usize| {
+        photocraft_io::import_with_svg_group_depth(name, bytes, max_svg_group_depth)
             .map(|r| (r.document, r.warnings))
             .map_err(|e| e.to_string())
     }));
