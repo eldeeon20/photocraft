@@ -113,6 +113,7 @@ impl eframe::App for MobileShell {
             mobile::render_file_picker_dialog(&ctx, &mut state);
             mobile::render_save_dialog(&ctx, &mut state);
             mobile::render_status_banner(&mut self.app, &mut state, &ctx);
+            mobile::render_notice_dialog(&mut state, &ctx);
         }
 
         // The shell's replies arrive while nothing touches the screen: keep frames coming.

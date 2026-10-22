@@ -30,6 +30,9 @@ pub struct MobileState {
     /// Last status shown as a transient banner, with the time it appeared.
     pub last_status: String,
     pub status_at: f64,
+    /// A save/open outcome to confirm in a dialog (None when there is nothing to tell).
+    pub notice: Option<String>,
+    pub notice_error: bool,
     pub is_fullscreen: bool,
 }
 
@@ -177,6 +180,10 @@ pub fn render_fullscreen_exit_button(ctx: &egui::Context, state: &mut MobileStat
 pub fn render_status_banner(app: &mut PhotocraftApp, state: &mut MobileState, ctx: &egui::Context) {
     let now = ctx.input(|i| i.time);
     if state.last_status != app.ui.status {
+        if state.status_at > 0.0 && (app.ui.status_error || app.ui.status.starts_with("Saved")) {
+            state.notice = Some(app.ui.status.clone());
+            state.notice_error = app.ui.status_error;
+        }
         state.last_status = app.ui.status.clone();
         state.status_at = now;
     }
@@ -192,6 +199,32 @@ pub fn render_status_banner(app: &mut PhotocraftApp, state: &mut MobileState, ct
                 ui.colored_label(color, RichText::new(&app.ui.status).size(14.0));
             });
         });
+}
+
+
+/// The save/open outcome as a dialog the user confirms: a small window with the result and OK.
+pub fn render_notice_dialog(state: &mut MobileState, ctx: &egui::Context) {
+    if state.notice.is_none() {
+        return;
+    }
+    let error = state.notice_error;
+    let text = state.notice.clone().unwrap_or_default();
+    let mut open = true;
+    egui::Window::new(if error { "⚠ PhotoCraft" } else { "✓ PhotoCraft" })
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+            ui.label(RichText::new(text).size(15.0));
+            ui.add_space(8.0);
+            if ui.button(RichText::new("OK").strong()).clicked() {
+                state.notice = None;
+            }
+        });
+    if !open || state.notice.as_ref().is_some_and(|t| t.is_empty()) {
+        state.notice = None;
+    }
 }
 
 /// Mobile file picker dialog for opening images.
@@ -367,6 +400,8 @@ pub fn poll_saf(app: &mut PhotocraftApp, state: &mut MobileState) {
                 let why = other.strip_prefix("ERR ").unwrap_or(other).to_string();
                 app.ui.status = format!("Couldn't open the picture: {why}");
                 app.ui.status_error = true;
+                state.notice = Some(format!("Couldn't open the picture: {why}"));
+                state.notice_error = true;
                 if let Some(reply) = state.pending_open.take() {
                     reply.send(Some(FileDialogAnswer::Unavailable(why)));
                 }
@@ -381,16 +416,24 @@ pub fn poll_saf(app: &mut PhotocraftApp, state: &mut MobileState) {
         let mut lines = text.lines();
         match lines.next().unwrap_or("").trim() {
             "OK" => {
-                app.ui.status = format!("Saved {}", lines.next().unwrap_or("").trim());
+                let text = format!("Saved {}", lines.next().unwrap_or("").trim());
+                app.ui.status = text.clone();
                 app.ui.status_error = false;
+                state.notice = Some(text);
+                state.notice_error = false;
             }
             "CANCEL" => {
                 app.ui.status = "Save cancelled".into();
                 app.ui.status_error = true;
+                state.notice = Some("Save cancelled".into());
+                state.notice_error = true;
             }
             other => {
-                app.ui.status = other.strip_prefix("ERR ").unwrap_or(other).to_string();
+                let text = other.strip_prefix("ERR ").unwrap_or(other).to_string();
+                app.ui.status = text.clone();
                 app.ui.status_error = true;
+                state.notice = Some(format!("Couldn't save: {text}"));
+                state.notice_error = true;
             }
         }
     }
