@@ -218,10 +218,16 @@ pub fn render_file_picker_dialog(ctx: &egui::Context, state: &mut MobileState) {
             });
 
             // List folders and files in current directory
-            let (dirs, files) = list_entries_in_dir(&state.current_dir);
+            let (dirs, files, list_error) = list_entries_in_dir(&state.current_dir);
 
             egui::ScrollArea::vertical().max_height(max_h - 150.0).show(ui, |ui| {
-                if dirs.is_empty() && files.is_empty() {
+                if let Some(error) = &list_error {
+                    ui.colored_label(
+                        egui::Color32::LIGHT_RED,
+                        format!("Cannot read {}: {error}", state.current_dir.display()),
+                    );
+                    ui.label("PhotoCraft needs storage access to browse your pictures (grant it in Android's prompt or app settings).");
+                } else if dirs.is_empty() && files.is_empty() {
                     ui.label("No supported files or folders found here.");
                 }
 
@@ -331,7 +337,14 @@ pub fn render_save_dialog(ctx: &egui::Context, state: &mut MobileState) {
 
             ui.add_space(6.0);
             let save_dir = PathBuf::from("/sdcard/Pictures/PhotoCraft");
+            let can_write_dir = save_dir.is_dir() || std::fs::create_dir_all(&save_dir).is_ok();
             ui.label(RichText::new(format!("Destination: {}", save_dir.display())).weak().small());
+            if !can_write_dir {
+                ui.colored_label(
+                    egui::Color32::LIGHT_RED,
+                    "Cannot write there: grant PhotoCraft storage access first.",
+                );
+            }
 
             ui.add_space(10.0);
             ui.horizontal(|ui| {
@@ -342,9 +355,8 @@ pub fn render_save_dialog(ctx: &egui::Context, state: &mut MobileState) {
                     }
                 }
 
-                let can_save = !state.save_filename.trim().is_empty();
+                let can_save = !state.save_filename.trim().is_empty() && can_write_dir;
                 if ui.add_enabled(can_save, egui::Button::new(RichText::new("Save Now").strong())).clicked() {
-                    let _ = std::fs::create_dir_all(&save_dir);
                     let filename = if Path::new(&state.save_filename).extension().is_none() {
                         format!("{}.png", state.save_filename.trim())
                     } else {
@@ -377,29 +389,33 @@ pub(crate) fn default_browse_dir() -> PathBuf {
     }
 }
 
-fn list_entries_in_dir(dir: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
+fn list_entries_in_dir(dir: &Path) -> (Vec<PathBuf>, Vec<PathBuf>, Option<String>) {
     let mut dirs = Vec::new();
     let mut files = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                if let Some(name) = path.file_name().and_then(|n| n.to_str())
-                    && !name.starts_with('.')
+    let mut error = None;
+    match std::fs::read_dir(dir) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                        && !name.starts_with('.')
+                    {
+                        dirs.push(path);
+                    }
+                } else if path.is_file()
+                    && let Some(ext) = path.extension().and_then(|e| e.to_str())
                 {
-                    dirs.push(path);
-                }
-            } else if path.is_file()
-                && let Some(ext) = path.extension().and_then(|e| e.to_str())
-            {
-                let ext_lower = ext.to_ascii_lowercase();
-                if IMAGE_EXTENSIONS.contains(&ext_lower.as_str()) {
-                    files.push(path);
+                    let ext_lower = ext.to_ascii_lowercase();
+                    if IMAGE_EXTENSIONS.contains(&ext_lower.as_str()) {
+                        files.push(path);
+                    }
                 }
             }
         }
+        Err(e) => error = Some(e.to_string()),
     }
     dirs.sort();
     files.sort();
-    (dirs, files)
+    (dirs, files, error)
 }

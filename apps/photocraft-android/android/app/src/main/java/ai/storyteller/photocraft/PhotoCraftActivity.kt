@@ -42,16 +42,16 @@ class PhotoCraftActivity : NativeActivity() {
         askForStorage()
     }
 
-    private fun mediaPermission(): String =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Manifest.permission.READ_MEDIA_IMAGES
-        } else {
-            Manifest.permission.READ_EXTERNAL_STORAGE
-        }
+    /// Android 9/10 read and write the shared storage with the legacy storage permissions;
+    /// writing is what saving to /sdcard/Pictures needs, so both are requested together.
+    private val legacyPermissions = arrayOf(
+        Manifest.permission.READ_EXTERNAL_STORAGE,
+        Manifest.permission.WRITE_EXTERNAL_STORAGE,
+    )
 
     private fun hasStorage(): Boolean = when {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> Environment.isExternalStorageManager()
-        else -> checkSelfPermission(mediaPermission()) == PackageManager.PERMISSION_GRANTED
+        else -> legacyPermissions.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
     }
 
     private fun askForStorage() {
@@ -65,7 +65,7 @@ class PhotoCraftActivity : NativeActivity() {
                         "Android 11+ grants this in Settings: open it and switch on " +
                             "\"Allow access to all files\" for PhotoCraft."
                     } else {
-                        "Allow storage access so PhotoCraft can list your pictures."
+                        "Allow storage access so PhotoCraft can list your pictures and save to them."
                     }
             )
             .setPositiveButton(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) "Open settings" else "Allow") { _, _ ->
@@ -89,7 +89,7 @@ class PhotoCraftActivity : NativeActivity() {
                 startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
             }
         } else {
-            requestPermissions(arrayOf(mediaPermission()), REQ_STORAGE)
+            requestPermissions(legacyPermissions, REQ_STORAGE)
         }
     }
 
