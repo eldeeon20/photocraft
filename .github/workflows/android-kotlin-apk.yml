@@ -5,11 +5,6 @@ name: android-kotlin-apk
 
 on:
   push:
-    branches:
-      - android-kotlin
-    paths:
-      - "apps/photocraft-android/android/**"
-      - ".github/workflows/android-kotlin-apk.yml"
     tags:
       - "apk-*"
   workflow_dispatch:
