@@ -105,7 +105,7 @@ impl eframe::App for MobileShell {
 fn create_mobile_services(storage_dir: Option<PathBuf>, mobile_state: mobile::SharedMobileState) -> Services {
     let mut services = Services::default();
 
-    if let Some(dir) = storage_dir {
+    if let Some(ref dir) = storage_dir {
         let prefs_dir = dir.join("prefs");
         let _ = std::fs::create_dir_all(&prefs_dir);
         let prefs_file = prefs_dir.join("photocraft_prefs.json");
