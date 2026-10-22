@@ -103,13 +103,23 @@ pub fn render_mobile_action_bar(app: &mut PhotocraftApp, state: &mut MobileState
 
                 // Undo / Redo
                 let can_undo = app.session.active().map(|d| d.history.can_undo()).unwrap_or(false);
-                if ui.add_enabled(can_undo, egui::Button::new("↩")).clicked() {
-                    let _ = app.session.undo();
+                if ui.add_enabled(can_undo, egui::Button::new("↩")).clicked()
+                    && let Err(e) = app.run("edit.undo", serde_json::json!({}))
+                {
+                    app.ui.status = e.clone();
+                    app.ui.status_error = true;
+                    state.notice = Some(format!("Couldn't undo: {e}"));
+                    state.notice_error = true;
                 }
 
                 let can_redo = app.session.active().map(|d| d.history.can_redo()).unwrap_or(false);
-                if ui.add_enabled(can_redo, egui::Button::new("↪")).clicked() {
-                    let _ = app.session.redo();
+                if ui.add_enabled(can_redo, egui::Button::new("↪")).clicked()
+                    && let Err(e) = app.run("edit.redo", serde_json::json!({}))
+                {
+                    app.ui.status = e.clone();
+                    app.ui.status_error = true;
+                    state.notice = Some(format!("Couldn't redo: {e}"));
+                    state.notice_error = true;
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
