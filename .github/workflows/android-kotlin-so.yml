@@ -5,6 +5,9 @@ name: android-kotlin-so
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - "so-*"
 
 permissions:
   contents: read

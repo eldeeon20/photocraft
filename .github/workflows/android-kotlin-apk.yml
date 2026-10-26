@@ -5,6 +5,9 @@ name: android-kotlin-apk
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - "apk-*"
 
 permissions:
   contents: read
