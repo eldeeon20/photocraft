@@ -4,7 +4,6 @@ import android.Manifest
 import android.app.AlertDialog
 import android.app.NativeActivity
 import android.content.Intent
-import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -51,10 +50,6 @@ class PhotoCraftActivity : NativeActivity() {
     private data class PendingSave(val staged: File, val name: String, val mime: String)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Landscape only: the canvas is laid out for the wide side of the screen, and rotating
-        // mid-edit would resize the whole workspace. Locked before super so the first frame
-        // never starts portrait.
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         super.onCreate(savedInstanceState)
         // Rust reads this to tell whether the shell is really running in the same data dir.
         runCatching { File(root, "boot.txt").writeText("alive ${filesDir.absolutePath}") }
