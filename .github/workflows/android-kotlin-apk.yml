@@ -36,7 +36,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          id=$(gh api "repos/${{ github.repository }}/actions/workflows/android-kotlin-so.yml/runs?status=success&per_page=1" --jq '.workflow_runs[0].id')
+          id=$(gh api "repos/${{ github.repository }}/actions/runs?per_page=30" --jq '[.workflow_runs[] | select(.name == "android-kotlin-so" and .status == "completed" and .conclusion == "success")][0].id')
           test -n "$id"
           echo "run-id=$id" >> "$GITHUB_OUTPUT"
       - name: Download the prebuilt core
